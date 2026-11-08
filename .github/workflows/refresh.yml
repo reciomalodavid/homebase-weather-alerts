@@ -1,0 +1,40 @@
+name: Refresh official AEMET warnings
+on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      ['collector.py', 'test_collector.py', '.github/workflows/refresh.yml']
+permissions:
+  contents: write
+concurrency:
+  group: official-warnings
+  cancel-in-progress: false
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Bootstrap official boundaries once
+        run: |
+          if [ ! -f data/zones.json.gz ]; then
+            pip install pyshp==2.3.1 pyproj==3.7.2
+            python build_zones.py
+          fi
+      - run: python -m unittest test_collector
+      - run: python collector.py
+      - name: Publish verified snapshot
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/warnings.json data/zones.json.gz
+          if ! git diff --cached --quiet; then
+            git commit -m 'Refresh official warning snapshot [skip ci]'
+            git push
+          fi
