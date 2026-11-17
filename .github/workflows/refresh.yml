@@ -29,6 +29,32 @@ jobs:
           fi
       - run: python -m unittest test_collector
       - run: python collector.py
+      # Run only on source changes: diagnose whether a browser can fetch the
+      # official source directly. No production data or credentials are sent.
+      - name: Probe direct browser access to the official source
+        if: github.event_name == 'push'
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import urllib.request
+          import xml.etree.ElementTree as ET
+          from collector import FEED
+          origin = 'https://homebase-rebuild-staging.web.app'
+          def probe(url):
+              req = urllib.request.Request(url, headers={'Origin': origin, 'User-Agent': 'Mozilla/5.0', 'Cache-Control': 'no-cache'})
+              with urllib.request.urlopen(req, timeout=20) as response:
+                  print('URL:', response.geturl())
+                  print('HTTP:', response.status, 'CORS:', response.headers.get('Access-Control-Allow-Origin', 'MISSING'))
+                  print('Cache-Control:', response.headers.get('Cache-Control', 'MISSING'), 'Age:', response.headers.get('Age', 'MISSING'))
+                  return response.read(8_000_001)
+          raw = probe(FEED)
+          links = ET.fromstring(raw).findall('./channel/item/link')
+          cap_url = next((item.text for item in links if item.text and item.text.startswith('https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/') and item.text.endswith('.xml')), None)
+          if cap_url:
+              probe(cap_url)
+          else:
+              print('No individual CAP message currently in the feed')
+          PY
       - name: Publish verified snapshot
         run: |
           git config user.name 'github-actions[bot]'
